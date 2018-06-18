@@ -24,6 +24,8 @@ const isEventHandled = require('isEventHandled');
 const isSelectionAtLeafStart = require('isSelectionAtLeafStart');
 const nullthrows = require('nullthrows');
 const setImmediate = require('setImmediate');
+const editOnInput = require('editOnInput');
+const editOnSelect = require('editOnSelect');
 
 // When nothing is focused, Firefox regards two characters, `'` and `/`, as
 // commands that should open and focus the "quickfind" search bar. This should
@@ -35,6 +37,7 @@ const setImmediate = require('setImmediate');
 const FF_QUICKFIND_CHAR = "'";
 const FF_QUICKFIND_LINK_CHAR = '/';
 const isFirefox = UserAgent.isBrowser('Firefox');
+const isIE = UserAgent.isBrowser('IE');
 
 function mustPreventDefaultForCharacter(character: string): boolean {
   return (
@@ -76,10 +79,10 @@ function editOnBeforeInput(
   editor: DraftEditor,
   e: SyntheticInputEvent<>,
 ): void {
-  if (editor._pendingStateFromBeforeInput !== undefined) {
-    editor.update(editor._pendingStateFromBeforeInput);
-    editor._pendingStateFromBeforeInput = undefined;
-  }
+  // React doesn't fire a selection event until mouseUp, so it's possible to
+  // click to change selection, hold the mouse down, and type a character
+  // without React registering it. Let's sync the selection manually now.
+  editOnSelect(editor);
 
   const editorState = editor._latestEditorState;
 
@@ -262,17 +265,38 @@ function editOnBeforeInput(
   newEditorState = EditorState.set(newEditorState, {
     nativelyRenderedContent: newEditorState.getCurrentContent(),
   });
-  // The native event is allowed to occur. To allow user onChange handlers to
-  // change the inserted text, we wait until the text is actually inserted
-  // before we actually update our state. That way when we rerender, the text
-  // we see in the DOM will already have been inserted properly.
-  editor._pendingStateFromBeforeInput = newEditorState;
-  setImmediate(() => {
-    if (editor._pendingStateFromBeforeInput !== undefined) {
-      editor.update(editor._pendingStateFromBeforeInput);
-      editor._pendingStateFromBeforeInput = undefined;
+
+  editor._updatedNativeInsertionBlock = editorState
+    .getCurrentContent()
+    .getBlockForKey(editorState.getSelection().getAnchorKey());
+
+  // Allow the native insertion to occur and update our internal state to match.
+  // If editor.update() does something like changing a typed 'x' to 'abc' in an
+  // onChange() handler, we don't want our editOnInput() logic to squash that
+  // change in favor of the typed 'x'. Set a flag to ignore the next
+  // editOnInput() event in favor of what's in our internal state.
+  editor.update(newEditorState, true);
+
+  const editorStateAfterUpdate = editor._latestEditorState;
+  const contentStateAfterUpdate = editorStateAfterUpdate.getCurrentContent();
+  const expectedContentStateAfterUpdate = editorStateAfterUpdate.getNativelyRenderedContent();
+
+  if (
+    expectedContentStateAfterUpdate &&
+    expectedContentStateAfterUpdate === contentStateAfterUpdate
+  ) {
+    if (isIE) {
+      setImmediate(() => {
+        editOnInput(editor);
+      });
     }
-  });
+  } else {
+    // Outside callers (via the editor.onChange prop) have changed the
+    // editorState. No longer allow native insertion.
+    e.preventDefault();
+    editor._updatedNativeInsertionBlock = null;
+    editor._renderNativeContent = false;
+  }
 }
 
 module.exports = editOnBeforeInput;

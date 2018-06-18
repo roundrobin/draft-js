@@ -18,6 +18,7 @@ import type {DraftEditorModes} from 'DraftEditorModes';
 import type {DraftEditorDefaultProps, DraftEditorProps} from 'DraftEditorProps';
 import type {DraftScrollPosition} from 'DraftScrollPosition';
 
+const ContentBlock = require('ContentBlock');
 const DefaultDraftBlockRenderMap = require('DefaultDraftBlockRenderMap');
 const DefaultDraftInlineStyle = require('DefaultDraftInlineStyle');
 const DraftEditorCompositionHandler = require('DraftEditorCompositionHandler');
@@ -153,8 +154,9 @@ class DraftEditor extends React.Component<DraftEditorProps, State> {
   _editorKey: string;
   _placeholderAccessibilityID: string;
   _latestEditorState: EditorState;
+  _renderNativeContent: boolean;
+  _updatedNativeInsertionBlock: ?ContentBlock;
   _latestCommittedEditorState: EditorState;
-  _pendingStateFromBeforeInput: void | EditorState;
 
   /**
    * Define proxies that can route events to the current handler.
@@ -563,7 +565,11 @@ class DraftEditor extends React.Component<DraftEditorProps, State> {
    * an `onChange` prop to receive state updates passed along from this
    * function.
    */
-  update = (editorState: EditorState): void => {
+  update = (
+    editorState: EditorState,
+    renderNativeContent: boolean = false,
+  ): void => {
+    this._renderNativeContent = renderNativeContent;
     this._latestEditorState = editorState;
     this.props.onChange(editorState);
   };
